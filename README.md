@@ -1,6 +1,6 @@
 # Axum Experiment
 
-Rust 2024 REST API using Axum, Tokio, Serde, SQLx/PostgreSQL, and tracing.
+Rust 2024 REST API using Axum, Tokio, Serde, SeaORM/PostgreSQL, and tracing.
 
 ## Requirements
 
@@ -35,26 +35,24 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-PostgreSQL integration test (uses the configured database and only removes its
-own generated row):
+PostgreSQL integration test (create the test database once; the test applies
+SeaORM migrations and removes only its own rows):
 
 ```bash
-DATABASE_URL=postgres://app:localdev@localhost:5432/axum_experiment \
+docker compose exec -T db createdb -U app axum_experiment_test
+DATABASE_URL=postgres://app:localdev@localhost:5432/axum_experiment_test \
   cargo test --test postgres -- --ignored
 ```
 
-## SQLx offline query metadata
+## Migrations
 
-SQL statements use SQLx compile-time macros. To update `.sqlx` metadata after
-changing a query or migration, start PostgreSQL and install the SQLx CLI, then
-run:
+SeaORM migrations are defined in Rust under `src/infrastructure/migrations.rs`
+and run automatically outside production. In production they run only when
+`RUN_MIGRATIONS=true`. SeaORM tracks applied migrations in its own migration
+table. Start with a new, empty local database: a database previously initialized
+by SQLx is not adopted automatically and must be prepared manually before
+starting this version of the application. The application never resets or
+drops a database automatically.
 
-```bash
-cargo install sqlx-cli --version 0.8.6 --no-default-features --features rustls,postgres
-SQLX_OFFLINE=false DATABASE_URL=postgres://app:localdev@localhost:5432/axum_experiment \
-  cargo sqlx prepare
-SQLX_OFFLINE=true cargo check
-```
-
-Commit the generated `.sqlx` directory together with query changes. Never
-commit production credentials; the Compose defaults are only for local use.
+Never commit production credentials; the Compose defaults are only for local
+use.

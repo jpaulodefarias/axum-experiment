@@ -18,7 +18,7 @@ vertical slice.
 The implementation should prioritize maintainability, testability, explicit
 dependencies, clear separation between business logic and infrastructure,
 predictable builds, and a productive Rust development workflow. Application
-logic should remain independent of Axum, SQLx, PostgreSQL, HTTP, and JSON.
+logic should remain independent of Axum, SeaORM, PostgreSQL, HTTP, and JSON.
 
 # 2. Goals
 
@@ -27,17 +27,17 @@ The initial version must provide:
 - a REST API using Axum and Tokio;
 - Rust with Cargo as the build, dependency, and workspace tool;
 - JSON serialization and deserialization using Serde;
-- PostgreSQL access through SQLx;
+- PostgreSQL access through SeaORM;
 - structured application and request logging with tracing;
 - a health-check endpoint;
 - a pragmatic layered architecture with explicit dependency wiring;
 - Docker Compose for local PostgreSQL infrastructure;
 - automated unit and integration test support using Rust's built-in test framework;
-- database migrations managed by SQLx;
+- database migrations managed by SeaORM Migration;
 - formatting and linting through rustfmt and Clippy.
 
 The architecture should allow business features to be added without coupling
-domain or application logic to Axum, SQLx, HTTP, JSON serialization, or
+domain or application logic to Axum, SeaORM, HTTP, JSON serialization, or
 operating-system APIs.
 
 # 3. Non-goals
@@ -58,7 +58,7 @@ structured in-process instrumentation and logging.
 | HTTP | Axum |
 | Serialization | Serde + serde_json |
 | Database | PostgreSQL |
-| Database client and migrations | SQLx |
+| Database client and migrations | SeaORM |
 | Logging/instrumentation | tracing + tracing-subscriber |
 | API specification and UI | OpenAPI via Utoipa + Swagger UI |
 | Build and dependencies | Cargo |
@@ -69,11 +69,10 @@ Prefer well-supported crates and add dependencies only where they meet a
 clear requirement.
 
 Initial dependencies are expected to include `axum`, `tokio`, `serde`,
-`serde_json`, `sqlx` with PostgreSQL and Tokio runtime support, `tracing`, and
-`tracing-subscriber`. SQLx's `migrate` feature should be enabled for migration
-support. Add crates such as `thiserror`, `uuid`, or `chrono` only as needed by
-the implementation. Avoid adding a separate logging facade when `tracing`
-meets the requirement.
+`serde_json`, `sea-orm` with PostgreSQL and Tokio runtime support,
+`sea-orm-migration`, `tracing`, and `tracing-subscriber`. Add crates such as
+`thiserror`, `uuid`, or `chrono` only as needed by the implementation. Avoid
+adding a separate logging facade when `tracing` meets the requirement.
 
 # 5. Runtime and HTTP Framework
 
@@ -103,18 +102,17 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-Keep configuration and dependency features explicit in `Cargo.toml`. SQLx
-compile-time query checking may use `DATABASE_URL` or committed `.sqlx`
-metadata; whichever workflow is selected must be documented and reproducible.
-Do not expose credentials in committed configuration.
+Keep configuration and dependency features explicit in `Cargo.toml`. SeaORM
+entities and migrations are checked by Rust compilation; do not commit
+credentials in configuration.
 
 # 7. Database
 
-PostgreSQL is the primary relational database. SQLx provides the connection
-pool, queries, transactions, and versioned migrations. Create a `PgPool` during
-startup and pass it to infrastructure components that need it. Pool sizing,
-timeouts, and connection settings belong in configuration, not business
-logic.
+PostgreSQL is the primary relational database. SeaORM provides the connection
+pool, query API, transactions, and versioned migrations. Create a
+`DatabaseConnection` during startup and pass it to infrastructure components
+that need it. Pool sizing, timeouts, and connection settings belong in
+configuration, not business logic.
 
 Expected dependency direction:
 
@@ -125,17 +123,16 @@ Application use case
 Repository port
         ^
         |
-Postgres repository (SQLx)
+Postgres repository (SeaORM)
         |
         v
 PostgreSQL
 ```
 
-Repository interfaces/ports belong to an inner layer. SQL and SQLx row mapping
-belong to infrastructure. Do not put SQL in domain entities or use cases.
-Prefer SQLx's statically checked query macros when compatible with the chosen
-build workflow; otherwise use parameterized runtime queries. Never interpolate
-untrusted input into SQL strings.
+Repository interfaces/ports belong to an inner layer. SeaORM entities,
+queries, and row mapping belong to infrastructure. Do not put persistence code
+in domain entities or use cases. Use SeaORM's parameterized query APIs; never
+interpolate untrusted input into SQL strings.
 
 Run migrations as an explicit startup/deployment step according to environment
 policy. Automatic schema creation is not permitted in production. The local
@@ -154,7 +151,7 @@ Application (use cases / ports)
         v
 Domain (models / business rules)
 
-Infrastructure (SQLx / PostgreSQL / logging adapters)
+Infrastructure (SeaORM / PostgreSQL / logging adapters)
         └── implements ports defined by inner layers
 ```
 
@@ -167,7 +164,7 @@ HTTP request -> Axum handler -> application use case -> domain behavior
                                repository port
                                       ^
                                       |
-                           SQLx repository -> PostgreSQL
+                           SeaORM repository -> PostgreSQL
 ```
 
 Rust module visibility and explicit construction should support the intended
@@ -188,7 +185,7 @@ domain/
 └── error/
 ```
 
-Domain code must not depend on Axum, Tokio, SQLx, PostgreSQL, Serde, or HTTP.
+Domain code must not depend on Axum, Tokio, SeaORM, PostgreSQL, Serde, or HTTP.
 Use ordinary Rust types and domain-specific errors. Add behavior to entities
 when meaningful rules exist; avoid abstractions without a current need.
 
@@ -205,7 +202,7 @@ application/
 
 Use cases orchestrate application behavior, validate application-level rules,
 invoke domain behavior, and call repository ports. They must not know about
-HTTP, Axum handlers, SQL, SQLx pool types, or PostgreSQL connection objects.
+HTTP, Axum handlers, SQL, SeaORM pool types, or PostgreSQL connection objects.
 
 Use async functions where I/O is involved. Keep async traits and trait-object
 choices proportionate to the code: use a small port trait and a suitable async
@@ -225,8 +222,8 @@ pub trait UserRepository: Send + Sync {
 ```
 
 The exact trait syntax may use native async functions in traits or a compatible
-crate depending on object-safety and mocking requirements. Keep SQLx types out
-of the port contract.
+crate depending on object-safety and mocking requirements. Keep SeaORM types
+out of the port contract.
 
 ## 9.4 Infrastructure
 
@@ -240,9 +237,9 @@ infrastructure/
 └── logging/
 ```
 
-It owns SQLx queries, row mapping, migrations, PostgreSQL error translation,
+It owns SeaORM queries, row mapping, migrations, PostgreSQL error translation,
 and concrete repository implementations. Translate database errors into
-application/domain-safe errors; do not leak SQLx or raw PostgreSQL errors to
+application/domain-safe errors; do not leak SeaORM or raw PostgreSQL errors to
 handlers or clients.
 
 ## 9.5 Presentation
@@ -395,7 +392,7 @@ distributed tracing backend; OpenTelemetry integration is a future decision.
 Use Rust's built-in unit and integration test harness (`#[test]`, `#[tokio::test]`).
 Unit tests should cover domain behavior and use cases. Test application logic
 through repository ports with small fakes or mocks when they improve clarity.
-Integration tests should cover SQLx repositories and PostgreSQL migrations
+Integration tests should cover SeaORM repositories and PostgreSQL migrations
 against a real PostgreSQL instance, preferably started with Docker Compose.
 HTTP integration tests may run the Axum router in-process and exercise actual
 request/response behavior.
@@ -445,8 +442,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 The development environment should provide a stable Rust toolchain, Cargo,
-rustfmt, Clippy, and Docker Compose. Document SQLx offline metadata generation
-and migration commands in the README.
+rustfmt, Clippy, and Docker Compose. Document SeaORM migration commands in the
+README.
 
 # 20. Quality and Reliability
 
@@ -463,7 +460,7 @@ validated during startup.
 
 # 21. Initial Database Schema
 
-If the reference `User` feature is implemented, the first SQLx migration may
+If the reference `User` feature is implemented, the first SeaORM migration may
 create:
 
 ```sql
@@ -485,7 +482,7 @@ The first complete vertical slice should preferably be `Create User`:
 
 ```text
 POST /api/v1/users -> Axum handler -> CreateUser use case
-                   -> UserRepository port -> SQLx adapter -> PostgreSQL
+                   -> UserRepository port -> SeaORM adapter -> PostgreSQL
 ```
 
 Request:
@@ -516,12 +513,12 @@ startup logging and graceful shutdown where practical.
 
 ## Phase 3 — PostgreSQL
 
-Add PostgreSQL configuration, SQLx `PgPool`, checked-in migrations, and
+Add PostgreSQL configuration, SeaORM `DatabaseConnection`, checked-in migrations, and
 database health/readiness verification.
 
 ## Phase 4 — First vertical slice
 
-Implement the User model, application use case, repository port, SQLx
+Implement the User model, application use case, repository port, SeaORM
 repository, HTTP DTO/handler, and `POST /api/v1/users`.
 
 ## Phase 5 — Testing
@@ -539,7 +536,7 @@ introduced.
 A feature is complete when it builds without project warnings, relevant unit
 and integration tests pass, formatting and Clippy checks pass, public APIs are
 documented where needed, HTTP errors follow the standard format, business
-logic remains outside handlers, and SQLx infrastructure types do not leak
+logic remains outside handlers, and SeaORM infrastructure types do not leak
 into domain/application contracts.
 
 # 25. Design Principles
@@ -572,11 +569,11 @@ newtypes or cases where positional meaning is part of the type's purpose.
 
 ```text
 1. Bootstrap a Rust 2024 Cargo application.
-2. Add Axum, Tokio, Serde, SQLx/PostgreSQL, and tracing.
+2. Add Axum, Tokio, Serde, SeaORM/PostgreSQL, and tracing.
 3. Create the initial domain, application, infrastructure, and HTTP modules.
 4. Create the application entry point and explicit dependency wiring.
 5. Implement GET /health returning {"status":"UP"}.
-6. Add SQLx migration and PostgreSQL development infrastructure.
+6. Add SeaORM migration and PostgreSQL development infrastructure.
 7. Add unit and integration test coverage.
 8. Document the local Cargo workflow and Docker Compose PostgreSQL service.
 9. Configure rustfmt and Clippy checks.
@@ -598,7 +595,7 @@ Pagination conventions and API versioning
 Graceful shutdown policy
 Secrets management
 Production deployment
-SQLx query-checking workflow (DATABASE_URL vs. offline metadata)
+SeaORM entity and migration workflow
 ```
 
 # 29. Architecture Decision Log
@@ -609,8 +606,8 @@ Record significant choices under `docs/adr/`, using a structure such as:
 docs/adr/
 ├── 0001-use-axum-tokio.md
 ├── 0002-use-clean-architecture.md
-├── 0003-use-sqlx.md
-└── 0004-use-postgresql.md
+├── 0004-use-postgresql-and-sqlx.md
+└── 0009-use-seaorm.md
 ```
 
 Each ADR should describe context, decision, consequences, and alternatives
@@ -627,7 +624,7 @@ allowing handlers and runtime concerns to remain at the system boundary.
 
 ## ADR-002 — Layered architecture
 
-Decision: keep domain and application logic independent from Axum and SQLx.
+Decision: keep domain and application logic independent from Axum and SeaORM.
 
 Rationale: this keeps business behavior testable and external adapters
 replaceable.
@@ -639,8 +636,11 @@ linting.
 
 ## ADR-004 — PostgreSQL and SQLx
 
-Decision: use PostgreSQL as the primary relational database and SQLx as its
-Rust client, pool, query, and migration integration.
+Initial decision: use PostgreSQL as the primary relational database and SQLx
+as its Rust client, pool, query, and migration integration.
+
+Status: superseded by ADR-009. SeaORM continues to use SQLx internally for its
+PostgreSQL driver, but application code no longer uses SQLx directly.
 
 ## ADR-005 — Serde
 
@@ -668,6 +668,22 @@ assets.
 
 Rationale: provide interactive, versioned API documentation without relying
 on a runtime CDN or a separate manually maintained specification.
+
+## ADR-009 — SeaORM for PostgreSQL persistence
+
+Decision: use SeaORM for the PostgreSQL connection, repository queries, entity
+mapping, and versioned migrations. Keep the migration definitions in the
+application crate because the current deployment runs them through the
+application startup path; do not add a separate migration crate or CLI yet.
+
+Rationale: the application is a single small service with one repository and
+already applies migrations from its composition root. SeaORM removes direct
+SQLx usage while keeping the repository port and HTTP contract unchanged.
+
+Consequences: SeaORM owns a separate migration history table. A database
+previously initialized by SQLx requires manual preparation or a new empty
+database before this version starts; startup never resets or drops a database.
+SeaORM continues to use SQLx internally for its PostgreSQL driver.
 
 # 31. Guiding Constraint
 

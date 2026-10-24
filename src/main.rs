@@ -1,7 +1,10 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
-use axum_experiment::{app, infrastructure::postgres::PgUserRepository};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use axum_experiment::{
+    app,
+    infrastructure::{migrations::Migrator, postgres::PgUserRepository},
+};
+use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -27,16 +30,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if max_connections == 0 {
         return Err("DATABASE_MAX_CONNECTIONS must be greater than zero".into());
     }
-    let pool = PgPoolOptions::new()
-        .max_connections(max_connections)
-        .connect(&database_url)
-        .await?;
+    let mut connection_options = ConnectOptions::new(database_url);
+    connection_options.max_connections(max_connections);
+    let connection = Database::connect(connection_options).await?;
 
     if app_env != "production" || env::var("RUN_MIGRATIONS").as_deref() == Ok("true") {
-        migrate(&pool).await?;
+        migrate(&connection).await?;
     }
 
-    let repository = Arc::new(PgUserRepository { pool });
+    let repository = Arc::new(PgUserRepository { connection });
     let application = app(repository);
     let host = env::var("HTTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
     let port = env::var("HTTP_PORT")
@@ -51,8 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn migrate(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
-    sqlx::migrate!("./migrations").run(pool).await
+async fn migrate(connection: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
+    use sea_orm_migration::MigratorTrait;
+
+    Migrator::up(connection, None).await?;
+    Ok(())
 }
 
 async fn shutdown_signal() {

@@ -22,7 +22,7 @@ use super::{
     info(
         title = "Axum Experiment API",
         version = "0.1.0",
-        description = "REST API implemented with Rust, Axum, Tokio, and SQLx."
+        description = "REST API implemented with Rust, Axum, Tokio, and SeaORM."
     )
 )]
 pub struct ApiDoc;
