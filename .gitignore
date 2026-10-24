@@ -1,3 +1,6 @@
 /target
 .env
-.sqlx/query-*.json.tmp
+
+# SQLx offline metadata (*.json) is committed so builds work without a database.
+# Ignore only transient files left during metadata generation.
+.sqlx/*.tmp
